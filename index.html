@@ -471,14 +471,27 @@
             const playersRef = database.ref('players-waiting');
             const gamesRef = database.ref('games');
             
-            playersRef.once('value', snapshot => {
-                const waitingPlayers = snapshot.val();
-                if (!waitingPlayers || Object.keys(waitingPlayers).length === 0) {
-                    playersRef.child(playerId).set({ waiting: true });
-                } else {
-                    const opponent = Object.keys(waitingPlayers)[0];
-                    if (opponent !== playerId) {
-                        opponentId = opponent;
+            // Sử dụng transaction để đảm bảo chỉ một người chơi xử lý ghép đôi tại một thời điểm
+            database.ref('matchmaking-lock').transaction(lock => {
+                if (lock) {
+                    return lock; // Nếu khóa đang được giữ, không làm gì
+                }
+                return true; // Đặt khóa
+            }, (error, committed, snapshot) => {
+                if (error || !committed) {
+                    // Nếu có lỗi hoặc không khóa được, thử lại sau 1 giây
+                    setTimeout(startMatchmaking, 1000);
+                    return;
+                }
+
+                // Kiểm tra danh sách chờ
+                playersRef.once('value', snapshot => {
+                    const waitingPlayers = snapshot.val() || {};
+                    const waitingIds = Object.keys(waitingPlayers).filter(id => id !== playerId);
+
+                    if (waitingIds.length > 0) {
+                        // Có người chơi đang chờ, ghép đôi ngay lập tức
+                        opponentId = waitingIds[0];
                         gameId = gamesRef.push().key;
                         gamesRef.child(gameId).set({
                             players: {
@@ -487,12 +500,34 @@
                             }
                         });
                         playersRef.child(opponentId).remove();
+                        playersRef.child(playerId).remove();
                         startGame();
                         listenToOpponent();
                     } else {
+                        // Không có ai chờ, thêm vào danh sách chờ
                         playersRef.child(playerId).set({ waiting: true });
+                        // Lắng nghe khi có người chơi khác tham gia
+                        playersRef.on('child_added', snap => {
+                            if (snap.key !== playerId && gameId === null) {
+                                opponentId = snap.key;
+                                gameId = gamesRef.push().key;
+                                gamesRef.child(gameId).set({
+                                    players: {
+                                        [playerId]: { board: gameBoard, score: 0, lines: 0, level: 1, gameOver: false },
+                                        [opponentId]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false }
+                                    }
+                                });
+                                playersRef.child(opponentId).remove();
+                                playersRef.child(playerId).remove();
+                                startGame();
+                                listenToOpponent();
+                            }
+                        });
                     }
-                }
+
+                    // Giải phóng khóa sau khi hoàn tất
+                    database.ref('matchmaking-lock').set(false);
+                });
             });
         }
         
@@ -543,8 +578,12 @@
             lines = 0;
             level = 1;
             gameOver = false;
+            gameId = null;
+            opponentId = null;
             updateStats();
-            startMatchmaking();
+            startMatchBtn.disabled = false;
+            roomCodeDisplay.classList.add('d-none');
+            waitingScreen.classList.remove('d-none');
         });
     </script>
 </body>
