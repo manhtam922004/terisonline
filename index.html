@@ -1,206 +1,550 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multiplayer Tetris</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Tetris Online 2 Người Chơi</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
+        body {
+            background-color: #212529;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
         .game-container {
-            display: none;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
         }
-        canvas {
-            border: 1px solid #000;
-            background: #fff;
+        
+        .board {
+            display: grid;
+            grid-template-rows: repeat(20, 1fr);
+            grid-template-columns: repeat(10, 1fr);
+            width: 300px;
+            height: 600px;
+            background-color: #000;
+            border: 2px solid #444;
+            margin: 0 auto;
         }
+        
+        .cell {
+            border: 1px solid #333;
+        }
+        
+        .piece-preview {
+            display: grid;
+            grid-template-rows: repeat(4, 1fr);
+            grid-template-columns: repeat(4, 1fr);
+            width: 120px;
+            height: 120px;
+            background-color: #111;
+            border: 2px solid #444;
+            margin: 10px auto;
+        }
+        
+        .game-info {
+            background-color: #343a40;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .piece-i { background-color: cyan; }
+        .piece-j { background-color: blue; }
+        .piece-l { background-color: orange; }
+        .piece-o { background-color: yellow; }
+        .piece-s { background-color: lime; }
+        .piece-t { background-color: purple; }
+        .piece-z { background-color: red; }
+        
+        #waiting-screen, #game-over-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
         .opponent-board {
-            background: #f0f0f0;
+            display: grid;
+            grid-template-rows: repeat(20, 1fr);
+            grid-template-columns: repeat(10, 1fr);
+            width: 150px;
+            height: 300px;
+            background-color: #000;
+            border: 2px solid #444;
+            margin: 0 auto;
+        }
+        
+        .opponent-cell {
+            border: 1px solid #222;
+        }
+        
+        #room-code {
+            font-family: monospace;
+            font-size: 24px;
+            padding: 10px;
+            background-color: #333;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .blink {
+            animation: blink-animation 1s steps(5, start) infinite;
+        }
+        
+        @keyframes blink-animation {
+            to {
+                visibility: hidden;
+            }
+        }
+        
+        .game-btn {
+            margin: 5px;
+            min-width: 120px;
         }
     </style>
 </head>
-<body class="bg-dark text-light">
-    <div class="container text-center mt-5">
-        <h1 class="mb-4">Multiplayer Tetris</h1>
+<body>
+    <div class="container game-container mt-4">
+        <h1 class="text-center mb-4">Tetris Online 2 Người Chơi</h1>
         
-        <!-- Main Menu -->
-        <div id="mainMenu">
-            <button class="btn btn-primary btn-lg" onclick="startMatchmaking()">Play Now</button>
-            <div id="waitingMessage" class="mt-3" style="display: none;">
-                Waiting for opponent...
+        <div id="waiting-screen">
+            <h2>Tìm đối thủ</h2>
+            <div class="mb-3">
+                <button id="start-match-btn" class="btn btn-primary game-btn">Bắt đầu ghép đôi</button>
             </div>
-        </div>
-
-        <!-- Game Container -->
-        <div class="game-container row justify-content-center">
-            <div class="col-md-5">
-                <h3>Your Board</h3>
-                <canvas id="board" width="240" height="400"></canvas>
-                <div class="mt-3">
-                    Score: <span id="score">0</span>
+            <div id="room-code-display" class="d-none">
+                <p>Đang chờ người chơi thứ hai...</p>
+                <div class="spinner-border text-light" role="status">
+                    <span class="visually-hidden">Loading...</span>
                 </div>
             </div>
-            <div class="col-md-5">
-                <h3>Opponent's Board</h3>
-                <canvas id="opponentBoard" class="opponent-board" width="240" height="400"></canvas>
-                <div class="mt-3">
-                    Score: <span id="opponentScore">0</span>
+        </div>
+        
+        <div id="game-over-screen" class="d-none">
+            <h2 id="game-result">Game Over</h2>
+            <p id="final-score"></p>
+            <button id="play-again-btn" class="btn btn-primary mt-3">Chơi lại</button>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="game-info">
+                    <h3>Thông tin đối thủ</h3>
+                    <p>Tên: <span id="opponent-name">Đang chờ...</span></p>
+                    <p>Điểm: <span id="opponent-score">0</span></p>
+                    <p>Dòng: <span id="opponent-lines">0</span></p>
+                    <p>Cấp độ: <span id="opponent-level">1</span></p>
+                    <div class="opponent-board" id="opponent-board"></div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="board" id="game-board"></div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="game-info">
+                    <h3>Thông tin của bạn</h3>
+                    <p>Điểm: <span id="score">0</span></p>
+                    <p>Dòng: <span id="lines">0</span></p>
+                    <p>Cấp độ: <span id="level">1</span></p>
+                    <h4>Khối tiếp theo:</h4>
+                    <div class="piece-preview" id="next-piece"></div>
+                    <h4>Điều khiển:</h4>
+                    <p>← ↑ → ↓: Di chuyển</p>
+                    <p>Space: Thả nhanh</p>
+                    <p>P: Tạm dừng</p>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.19.1/firebase-app-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.19.1/firebase-database-compat.js"></script>
     
     <script>
-        // Firebase configuration
+        // Khởi tạo Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyB4sGv7jJz8K5r7Q7Z8X7q7Z8X7q7Z8X7",
             authDomain: "waitcall-87f5e.firebaseapp.com",
-            databaseURL: "https://waitcall-87f5e-default-rtdb.asia-southeast1.firebasedatabase.app",
+            databaseURL: "https://waitcall-87f5e-default-rtdb.asia-southeast1.firebasedatabase.app/",
             projectId: "waitcall-87f5e",
             storageBucket: "waitcall-87f5e.firebasestorage.app",
             messagingSenderId: "535766267900",
             appId: "1:535766267900:web:572b04459493c157bd6479"
         };
-
-        // Initialize Firebase
+        
         firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-
-        // Game variables
-        let gameRoomRef;
-        let userId;
-        let isHost = false;
-        let tetris;
-        let opponentTetris;
-
-        class Tetris {
-            constructor(canvas, onUpdate) {
-                this.canvas = canvas;
-                this.ctx = canvas.getContext('2d');
-                this.board = Array(20).fill().map(() => Array(10).fill(0));
-                this.score = 0;
-                this.onUpdate = onUpdate;
-                
-                // Tetris pieces and logic
-                // ... (Thêm logic xử lý Tetris ở đây)
-            }
-
-            // Các phương thức Tetris (update, draw, move, rotate, etc.)
-            // ...
+        const database = firebase.database();
+        
+        // Khởi tạo biến game
+        const BOARD_WIDTH = 10;
+        const BOARD_HEIGHT = 20;
+        const PREVIEW_SIZE = 4;
+        const COLORS = {
+            'I': 'piece-i', 'J': 'piece-j', 'L': 'piece-l',
+            'O': 'piece-o', 'S': 'piece-s', 'T': 'piece-t', 'Z': 'piece-z'
+        };
+        
+        const SHAPES = {
+            'I': [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+            'J': [[1,0,0],[1,1,1],[0,0,0]],
+            'L': [[0,0,1],[1,1,1],[0,0,0]],
+            'O': [[1,1],[1,1]],
+            'S': [[0,1,1],[1,1,0],[0,0,0]],
+            'T': [[0,1,0],[1,1,1],[0,0,0]],
+            'Z': [[1,1,0],[0,1,1],[0,0,0]]
+        };
+        
+        let gameBoard = createEmptyBoard();
+        let currentPiece = null;
+        let nextPiece = null;
+        let currentPosition = { x: 0, y: 0 };
+        let score = 0;
+        let lines = 0;
+        let level = 1;
+        let gameInterval = null;
+        let isPaused = false;
+        let gameOver = false;
+        let playerId = generatePlayerId();
+        let gameId = null;
+        let opponentId = null;
+        
+        const gameBoardElement = document.getElementById('game-board');
+        const nextPieceElement = document.getElementById('next-piece');
+        const scoreElement = document.getElementById('score');
+        const linesElement = document.getElementById('lines');
+        const levelElement = document.getElementById('level');
+        const waitingScreen = document.getElementById('waiting-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const startMatchBtn = document.getElementById('start-match-btn');
+        const roomCodeDisplay = document.getElementById('room-code-display');
+        const playAgainBtn = document.getElementById('play-again-btn');
+        const opponentBoardElement = document.getElementById('opponent-board');
+        const opponentScoreElement = document.getElementById('opponent-score');
+        const opponentLinesElement = document.getElementById('opponent-lines');
+        const opponentLevelElement = document.getElementById('opponent-level');
+        const opponentNameElement = document.getElementById('opponent-name');
+        const gameResultElement = document.getElementById('game-result');
+        const finalScoreElement = document.getElementById('final-score');
+        
+        initializeBoard(gameBoardElement, 'cell', BOARD_WIDTH, BOARD_HEIGHT);
+        initializeBoard(nextPieceElement, 'cell', PREVIEW_SIZE, PREVIEW_SIZE);
+        initializeBoard(opponentBoardElement, 'opponent-cell', BOARD_WIDTH, BOARD_HEIGHT);
+        
+        function generatePlayerId() {
+            return 'player_' + Math.random().toString(36).substring(2, 10);
         }
-
-        async function startMatchmaking() {
-            document.getElementById('mainMenu').style.display = 'none';
-            document.getElementById('waitingMessage').style.display = 'block';
-            
-            userId = Math.random().toString(36).substr(2, 9);
-            
-            const waitingPlayers = await db.collection('waitingPlayers').get();
-            if (waitingPlayers.empty) {
-                // No players waiting, become host
-                isHost = true;
-                await db.collection('waitingPlayers').doc(userId).set({
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
+        
+        function initializeBoard(boardElement, cellClass, width, height) {
+            boardElement.innerHTML = '';
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add(cellClass);
+                    cell.dataset.x = x;
+                    cell.dataset.y = y;
+                    boardElement.appendChild(cell);
+                }
+            }
+        }
+        
+        function createEmptyBoard() {
+            return Array(BOARD_HEIGHT).fill().map(() => Array(BOARD_WIDTH).fill(0));
+        }
+        
+        function renderBoard() {
+            const cells = gameBoardElement.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const x = parseInt(cell.dataset.x);
+                const y = parseInt(cell.dataset.y);
+                Object.values(COLORS).forEach(color => cell.classList.remove(color));
                 
-                // Wait for player
-                db.collection('waitingPlayers').onSnapshot((snapshot) => {
-                    snapshot.docChanges().forEach((change) => {
-                        if (change.type === 'added' && !isHost) {
-                            startGame(change.doc.id);
-                        }
+                if (gameBoard[y][x]) {
+                    cell.classList.add(COLORS[gameBoard[y][x]]);
+                }
+                
+                if (currentPiece) {
+                    const shape = SHAPES[currentPiece];
+                    shape.forEach((row, dy) => {
+                        row.forEach((value, dx) => {
+                            if (value && x === currentPosition.x + dx && y === currentPosition.y + dy) {
+                                cell.classList.add(COLORS[currentPiece]);
+                            }
+                        });
                     });
-                });
-            } else {
-                // Join existing game
-                const host = waitingPlayers.docs[0];
-                await db.collection('waitingPlayers').doc(host.id).delete();
-                startGame(host.id);
-            }
+                }
+            });
         }
-
-        function startGame(roomId) {
-            gameRoomRef = db.collection('games').doc(roomId);
-            document.querySelector('.game-container').style.display = 'flex';
-            document.getElementById('waitingMessage').style.display = 'none';
-
-            // Initialize game
-            tetris = new Tetris(document.getElementById('board'), updateGameState);
-            opponentTetris = new Tetris(document.getElementById('opponentBoard'), () => {});
-
-            if (isHost) {
-                gameRoomRef.set({
-                    player1: userId,
-                    player2: '',
-                    gameState: {
-                        player1: tetris,
-                        player2: opponentTetris
+        
+        function renderNextPiece() {
+            const cells = nextPieceElement.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const x = parseInt(cell.dataset.x);
+                const y = parseInt(cell.dataset.y);
+                Object.values(COLORS).forEach(color => cell.classList.remove(color));
+                
+                if (nextPiece) {
+                    const shape = SHAPES[nextPiece];
+                    shape.forEach((row, dy) => {
+                        row.forEach((value, dx) => {
+                            if (value && x === dx && y === dy) {
+                                cell.classList.add(COLORS[nextPiece]);
+                            }
+                        });
+                    });
+                }
+            });
+        }
+        
+        function renderOpponentBoard(opponentBoard) {
+            const cells = opponentBoardElement.querySelectorAll('.opponent-cell');
+            cells.forEach(cell => {
+                const x = parseInt(cell.dataset.x);
+                const y = parseInt(cell.dataset.y);
+                Object.values(COLORS).forEach(color => cell.classList.remove(color));
+                
+                if (opponentBoard && opponentBoard[y][x]) {
+                    cell.classList.add(COLORS[opponentBoard[y][x]]);
+                }
+            });
+        }
+        
+        function spawnPiece() {
+            if (!nextPiece) {
+                nextPiece = Object.keys(SHAPES)[Math.floor(Math.random() * Object.keys(SHAPES).length)];
+            }
+            currentPiece = nextPiece;
+            nextPiece = Object.keys(SHAPES)[Math.floor(Math.random() * Object.keys(SHAPES).length)];
+            currentPosition = { x: Math.floor(BOARD_WIDTH / 2) - 2, y: 0 };
+            
+            if (checkCollision()) {
+                gameOver = true;
+                clearInterval(gameInterval);
+                showGameOver();
+            }
+            renderNextPiece();
+        }
+        
+        function checkCollision(offsetX = 0, offsetY = 0, newShape = SHAPES[currentPiece]) {
+            for (let y = 0; y < newShape.length; y++) {
+                for (let x = 0; x < newShape[y].length; x++) {
+                    if (newShape[y][x]) {
+                        const newX = currentPosition.x + x + offsetX;
+                        const newY = currentPosition.y + y + offsetY;
+                        if (newX < 0 || newX >= BOARD_WIDTH || newY >= BOARD_HEIGHT || 
+                            (newY >= 0 && gameBoard[newY][newX])) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        
+        function mergePiece() {
+            SHAPES[currentPiece].forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value) {
+                        gameBoard[currentPosition.y + y][currentPosition.x + x] = currentPiece;
                     }
                 });
-            } else {
-                gameRoomRef.update({
-                    player2: userId
+            });
+        }
+        
+        function clearLines() {
+            let linesCleared = 0;
+            for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
+                if (gameBoard[y].every(cell => cell !== 0)) {
+                    gameBoard.splice(y, 1);
+                    gameBoard.unshift(Array(BOARD_WIDTH).fill(0));
+                    linesCleared++;
+                    y++;
+                }
+            }
+            if (linesCleared > 0) {
+                lines += linesCleared;
+                score += linesCleared * 100 * level;
+                level = Math.floor(lines / 10) + 1;
+                updateStats();
+            }
+        }
+        
+        function updateStats() {
+            scoreElement.textContent = score;
+            linesElement.textContent = lines;
+            levelElement.textContent = level;
+            updateFirebase();
+        }
+        
+        function movePieceDown() {
+            currentPosition.y++;
+            if (checkCollision()) {
+                currentPosition.y--;
+                mergePiece();
+                clearLines();
+                spawnPiece();
+            }
+            renderBoard();
+        }
+        
+        function movePiece(offsetX) {
+            currentPosition.x += offsetX;
+            if (checkCollision()) {
+                currentPosition.x -= offsetX;
+            }
+            renderBoard();
+        }
+        
+        function rotatePiece() {
+            const originalShape = SHAPES[currentPiece];
+            const rotated = originalShape[0].map((_, index) => 
+                originalShape.map(row => row[index]).reverse()
+            );
+            if (!checkCollision(0, 0, rotated)) {
+                SHAPES[currentPiece] = rotated;
+            }
+            renderBoard();
+        }
+        
+        function dropPiece() {
+            while (!checkCollision()) {
+                currentPosition.y++;
+            }
+            currentPosition.y--;
+            mergePiece();
+            clearLines();
+            spawnPiece();
+            renderBoard();
+        }
+        
+        function startGame() {
+            waitingScreen.classList.add('d-none');
+            spawnPiece();
+            gameInterval = setInterval(() => {
+                if (!isPaused && !gameOver) {
+                    movePieceDown();
+                }
+            }, 1000 / level);
+            renderBoard();
+        }
+        
+        function showGameOver() {
+            gameOverScreen.classList.remove('d-none');
+            gameResultElement.textContent = "Game Over";
+            finalScoreElement.textContent = `Điểm của bạn: ${score}`;
+            updateFirebaseGameOver();
+        }
+        
+        function updateFirebase() {
+            if (gameId && playerId) {
+                database.ref(`games/${gameId}/players/${playerId}`).set({
+                    board: gameBoard,
+                    score: score,
+                    lines: lines,
+                    level: level,
+                    gameOver: gameOver
                 });
             }
-
-            // Listen for game updates
-            gameRoomRef.onSnapshot((doc) => {
-                const data = doc.data();
-                if (data.gameState) {
-                    // Update opponent state
-                    if (userId === data.player1) {
-                        opponentTetris = data.gameState.player2;
+        }
+        
+        function updateFirebaseGameOver() {
+            if (gameId && playerId) {
+                database.ref(`games/${gameId}/players/${playerId}/gameOver`).set(true);
+            }
+        }
+        
+        function startMatchmaking() {
+            startMatchBtn.disabled = true;
+            roomCodeDisplay.classList.remove('d-none');
+            
+            const playersRef = database.ref('players-waiting');
+            const gamesRef = database.ref('games');
+            
+            playersRef.once('value', snapshot => {
+                const waitingPlayers = snapshot.val();
+                if (!waitingPlayers || Object.keys(waitingPlayers).length === 0) {
+                    playersRef.child(playerId).set({ waiting: true });
+                } else {
+                    const opponent = Object.keys(waitingPlayers)[0];
+                    if (opponent !== playerId) {
+                        opponentId = opponent;
+                        gameId = gamesRef.push().key;
+                        gamesRef.child(gameId).set({
+                            players: {
+                                [playerId]: { board: gameBoard, score: 0, lines: 0, level: 1, gameOver: false },
+                                [opponentId]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false }
+                            }
+                        });
+                        playersRef.child(opponentId).remove();
+                        startGame();
+                        listenToOpponent();
                     } else {
-                        opponentTetris = data.gameState.player1;
+                        playersRef.child(playerId).set({ waiting: true });
                     }
-                    updateOpponentDisplay();
-                }
-            });
-
-            // Start game loop
-            setInterval(gameLoop, 1000);
-        }
-
-        function updateGameState() {
-            gameRoomRef.update({
-                gameState: {
-                    player1: isHost ? tetris : opponentTetris,
-                    player2: isHost ? opponentTetris : tetris
                 }
             });
         }
-
-        function updateOpponentDisplay() {
-            document.getElementById('opponentScore').textContent = opponentTetris.score;
-            // Vẽ lại opponent board
-            opponentTetris.draw();
+        
+        function listenToOpponent() {
+            database.ref(`games/${gameId}/players`).on('value', snapshot => {
+                const players = snapshot.val();
+                for (let id in players) {
+                    if (id !== playerId) {
+                        opponentId = id;
+                        renderOpponentBoard(players[id].board);
+                        opponentScoreElement.textContent = players[id].score;
+                        opponentLinesElement.textContent = players[id].lines;
+                        opponentLevelElement.textContent = players[id].level;
+                        opponentNameElement.textContent = id.substring(0, 8);
+                        if (players[id].gameOver && !gameOver) {
+                            gameResultElement.textContent = "Bạn thắng!";
+                            finalScoreElement.textContent = `Điểm của bạn: ${score}`;
+                            gameOverScreen.classList.remove('d-none');
+                            clearInterval(gameInterval);
+                        }
+                    }
+                }
+            });
         }
-
-        function gameLoop() {
-            tetris.update();
-            tetris.draw();
-            document.getElementById('score').textContent = tetris.score;
-        }
-
-        // Keyboard controls
-        document.addEventListener('keydown', (e) => {
-            switch(e.keyCode) {
-                case 37: // Left
-                    tetris.move(-1);
-                    break;
-                case 39: // Right
-                    tetris.move(1);
-                    break;
-                case 40: // Down
-                    tetris.drop();
-                    break;
-                case 38: // Up (Rotate)
-                    tetris.rotate();
-                    break;
+        
+        document.addEventListener('keydown', event => {
+            if (!gameOver && !isPaused && gameId) {
+                switch (event.key) {
+                    case 'ArrowLeft': movePiece(-1); break;
+                    case 'ArrowRight': movePiece(1); break;
+                    case 'ArrowDown': movePieceDown(); break;
+                    case 'ArrowUp': rotatePiece(); break;
+                    case ' ': dropPiece(); break;
+                    case 'p': case 'P':
+                        isPaused = !isPaused;
+                        break;
+                }
+                updateFirebase();
             }
+        });
+        
+        startMatchBtn.addEventListener('click', startMatchmaking);
+        
+        playAgainBtn.addEventListener('click', () => {
+            gameOverScreen.classList.add('d-none');
+            gameBoard = createEmptyBoard();
+            score = 0;
+            lines = 0;
+            level = 1;
+            gameOver = false;
+            updateStats();
+            startMatchmaking();
         });
     </script>
 </body>
