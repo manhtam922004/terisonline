@@ -88,25 +88,6 @@
             border: 1px solid #222;
         }
         
-        #room-code {
-            font-family: monospace;
-            font-size: 24px;
-            padding: 10px;
-            background-color: #333;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
-        
-        .blink {
-            animation: blink-animation 1s steps(5, start) infinite;
-        }
-        
-        @keyframes blink-animation {
-            to {
-                visibility: hidden;
-            }
-        }
-        
         .game-btn {
             margin: 5px;
             min-width: 120px;
@@ -468,66 +449,58 @@
             startMatchBtn.disabled = true;
             roomCodeDisplay.classList.remove('d-none');
             
-            const playersRef = database.ref('players-waiting');
+            const queueRef = database.ref('match-queue');
             const gamesRef = database.ref('games');
             
-            // Sử dụng transaction để đảm bảo chỉ một người chơi xử lý ghép đôi tại một thời điểm
-            database.ref('matchmaking-lock').transaction(lock => {
-                if (lock) {
-                    return lock; // Nếu khóa đang được giữ, không làm gì
-                }
-                return true; // Đặt khóa
-            }, (error, committed, snapshot) => {
-                if (error || !committed) {
-                    // Nếu có lỗi hoặc không khóa được, thử lại sau 1 giây
-                    setTimeout(startMatchmaking, 1000);
-                    return;
-                }
-
-                // Kiểm tra danh sách chờ
-                playersRef.once('value', snapshot => {
-                    const waitingPlayers = snapshot.val() || {};
-                    const waitingIds = Object.keys(waitingPlayers).filter(id => id !== playerId);
-
-                    if (waitingIds.length > 0) {
-                        // Có người chơi đang chờ, ghép đôi ngay lập tức
-                        opponentId = waitingIds[0];
-                        gameId = gamesRef.push().key;
-                        gamesRef.child(gameId).set({
-                            players: {
-                                [playerId]: { board: gameBoard, score: 0, lines: 0, level: 1, gameOver: false },
-                                [opponentId]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false }
-                            }
-                        });
-                        playersRef.child(opponentId).remove();
-                        playersRef.child(playerId).remove();
-                        startGame();
-                        listenToOpponent();
-                    } else {
-                        // Không có ai chờ, thêm vào danh sách chờ
-                        playersRef.child(playerId).set({ waiting: true });
-                        // Lắng nghe khi có người chơi khác tham gia
-                        playersRef.on('child_added', snap => {
-                            if (snap.key !== playerId && gameId === null) {
-                                opponentId = snap.key;
-                                gameId = gamesRef.push().key;
-                                gamesRef.child(gameId).set({
-                                    players: {
-                                        [playerId]: { board: gameBoard, score: 0, lines: 0, level: 1, gameOver: false },
-                                        [opponentId]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false }
-                                    }
-                                });
-                                playersRef.child(opponentId).remove();
-                                playersRef.child(playerId).remove();
-                                startGame();
-                                listenToOpponent();
-                            }
-                        });
+            // Thêm người chơi vào hàng đợi
+            queueRef.child(playerId).set({ timestamp: firebase.database.ServerValue.TIMESTAMP });
+            
+            // Kiểm tra và ghép đôi định kỳ
+            const checkQueue = setInterval(() => {
+                queueRef.once('value', snapshot => {
+                    const queue = snapshot.val();
+                    if (!queue) return;
+                    
+                    const players = Object.keys(queue).sort((a, b) => queue[a].timestamp - queue[b].timestamp);
+                    const myIndex = players.indexOf(playerId);
+                    
+                    if (myIndex === -1) {
+                        // Người chơi đã bị xóa khỏi hàng đợi (đã được ghép đôi)
+                        clearInterval(checkQueue);
+                        return;
                     }
-
-                    // Giải phóng khóa sau khi hoàn tất
-                    database.ref('matchmaking-lock').set(false);
+                    
+                    if (players.length >= 2) {
+                        // Có đủ 2 người chơi để ghép đôi
+                        const firstPlayer = players[0];
+                        const secondPlayer = players[1];
+                        
+                        if (playerId === firstPlayer || playerId === secondPlayer) {
+                            gameId = gamesRef.push().key;
+                            opponentId = playerId === firstPlayer ? secondPlayer : firstPlayer;
+                            
+                            gamesRef.child(gameId).set({
+                                players: {
+                                    [firstPlayer]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false },
+                                    [secondPlayer]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false }
+                                }
+                            });
+                            
+                            // Xóa cả hai người chơi khỏi hàng đợi
+                            queueRef.child(firstPlayer).remove();
+                            queueRef.child(secondPlayer).remove();
+                            
+                            clearInterval(checkQueue);
+                            startGame();
+                            listenToOpponent();
+                        }
+                    }
                 });
+            }, 1000); // Kiểm tra mỗi 1 giây
+            
+            // Xử lý khi người chơi rời trang
+            window.addEventListener('beforeunload', () => {
+                queueRef.child(playerId).remove();
             });
         }
         
