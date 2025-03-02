@@ -101,12 +101,24 @@
         <div id="waiting-screen">
             <h2>Tìm đối thủ</h2>
             <div class="mb-3">
-                <button id="start-match-btn" class="btn btn-primary game-btn">Bắt đầu ghép đôi</button>
+                <button id="create-room-btn" class="btn btn-primary game-btn">Tạo phòng</button>
+                <button id="join-room-btn" class="btn btn-success game-btn">Vào phòng</button>
             </div>
-            <div id="room-code-display" class="d-none">
-                <p>Đang chờ người chơi thứ hai...</p>
-                <div class="spinner-border text-light" role="status">
-                    <span class="visually-hidden">Loading...</span>
+            <div id="room-options" class="d-none">
+                <div id="room-code-display" class="d-none">
+                    <p>Mã phòng của bạn:</p>
+                    <div id="room-code"></div>
+                    <p>Đang chờ người chơi thứ hai...</p>
+                    <div class="spinner-border text-light" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <div id="join-form" class="d-none">
+                    <div class="mb-3">
+                        <label for="room-code-input" class="form-label">Nhập mã phòng:</label>
+                        <input type="text" class="form-control" id="room-code-input" placeholder="Nhập mã phòng">
+                    </div>
+                    <button id="connect-btn" class="btn btn-primary">Kết nối</button>
                 </div>
             </div>
         </div>
@@ -200,6 +212,7 @@
         let playerId = generatePlayerId();
         let gameId = null;
         let opponentId = null;
+        let isHost = false;
         
         const gameBoardElement = document.getElementById('game-board');
         const nextPieceElement = document.getElementById('next-piece');
@@ -208,8 +221,14 @@
         const levelElement = document.getElementById('level');
         const waitingScreen = document.getElementById('waiting-screen');
         const gameOverScreen = document.getElementById('game-over-screen');
-        const startMatchBtn = document.getElementById('start-match-btn');
+        const createRoomBtn = document.getElementById('create-room-btn');
+        const joinRoomBtn = document.getElementById('join-room-btn');
+        const roomOptions = document.getElementById('room-options');
         const roomCodeDisplay = document.getElementById('room-code-display');
+        const roomCodeElement = document.getElementById('room-code');
+        const joinForm = document.getElementById('join-form');
+        const roomCodeInput = document.getElementById('room-code-input');
+        const connectBtn = document.getElementById('connect-btn');
         const playAgainBtn = document.getElementById('play-again-btn');
         const opponentBoardElement = document.getElementById('opponent-board');
         const opponentScoreElement = document.getElementById('opponent-score');
@@ -225,6 +244,10 @@
         
         function generatePlayerId() {
             return 'player_' + Math.random().toString(36).substring(2, 10);
+        }
+        
+        function generateRoomCode() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
         }
         
         function initializeBoard(boardElement, cellClass, width, height) {
@@ -295,7 +318,7 @@
                 const y = parseInt(cell.dataset.y);
                 Object.values(COLORS).forEach(color => cell.classList.remove(color));
                 
-                if (opponentBoard && opponentBoard[y][x]) {
+                if (opponentBoard && opponentBoard[y] && opponentBoard[y][x]) {
                     cell.classList.add(COLORS[opponentBoard[y][x]]);
                 }
             });
@@ -429,7 +452,7 @@
         
         function updateFirebase() {
             if (gameId && playerId) {
-                database.ref(`games/${gameId}/players/${playerId}`).set({
+                database.ref(`games/${gameId}/players/${playerId}`).update({
                     board: gameBoard,
                     score: score,
                     lines: lines,
@@ -441,75 +464,94 @@
         
         function updateFirebaseGameOver() {
             if (gameId && playerId) {
-                database.ref(`games/${gameId}/players/${playerId}/gameOver`).set(true);
+                database.ref(`games/${gameId}/players/${playerId}`).update({
+                    gameOver: true
+                });
             }
         }
         
-        function startMatchmaking() {
-            startMatchBtn.disabled = true;
+        function createRoom() {
+            isHost = true;
+            gameId = generateRoomCode();
+            roomCodeElement.textContent = gameId;
+            roomOptions.classList.remove('d-none');
             roomCodeDisplay.classList.remove('d-none');
+            joinForm.classList.add('d-none');
             
-            const queueRef = database.ref('match-queue');
-            const gamesRef = database.ref('games');
+            database.ref(`games/${gameId}`).set({
+                players: {
+                    [playerId]: { board: gameBoard, score: 0, lines: 0, level: 1, gameOver: false }
+                },
+                status: 'waiting'
+            }).then(() => {
+                listenForOpponent();
+            });
+        }
+        
+        function joinRoom() {
+            roomOptions.classList.remove('d-none');
+            roomCodeDisplay.classList.add('d-none');
+            joinForm.classList.remove('d-none');
+        }
+        
+        function connectToRoom() {
+            gameId = roomCodeInput.value.toUpperCase();
+            if (!gameId) {
+                alert('Vui lòng nhập mã phòng!');
+                return;
+            }
             
-            // Thêm người chơi vào hàng đợi
-            queueRef.child(playerId).set({ timestamp: firebase.database.ServerValue.TIMESTAMP });
-            
-            // Kiểm tra và ghép đôi định kỳ
-            const checkQueue = setInterval(() => {
-                queueRef.once('value', snapshot => {
-                    const queue = snapshot.val();
-                    if (!queue) return;
-                    
-                    const players = Object.keys(queue).sort((a, b) => queue[a].timestamp - queue[b].timestamp);
-                    const myIndex = players.indexOf(playerId);
-                    
-                    if (myIndex === -1) {
-                        // Người chơi đã bị xóa khỏi hàng đợi (đã được ghép đôi)
-                        clearInterval(checkQueue);
-                        return;
-                    }
-                    
-                    if (players.length >= 2) {
-                        // Có đủ 2 người chơi để ghép đôi
-                        const firstPlayer = players[0];
-                        const secondPlayer = players[1];
-                        
-                        if (playerId === firstPlayer || playerId === secondPlayer) {
-                            gameId = gamesRef.push().key;
-                            opponentId = playerId === firstPlayer ? secondPlayer : firstPlayer;
-                            
-                            gamesRef.child(gameId).set({
-                                players: {
-                                    [firstPlayer]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false },
-                                    [secondPlayer]: { board: createEmptyBoard(), score: 0, lines: 0, level: 1, gameOver: false }
-                                }
-                            });
-                            
-                            // Xóa cả hai người chơi khỏi hàng đợi
-                            queueRef.child(firstPlayer).remove();
-                            queueRef.child(secondPlayer).remove();
-                            
-                            clearInterval(checkQueue);
-                            startGame();
-                            listenToOpponent();
-                        }
-                    }
+            database.ref(`games/${gameId}`).once('value', snapshot => {
+                const gameData = snapshot.val();
+                if (!gameData) {
+                    alert('Phòng không tồn tại!');
+                    return;
+                }
+                
+                const players = gameData.players;
+                if (Object.keys(players).length >= 2) {
+                    alert('Phòng đã đầy!');
+                    return;
+                }
+                
+                opponentId = Object.keys(players)[0];
+                database.ref(`games/${gameId}/players/${playerId}`).set({
+                    board: gameBoard,
+                    score: 0,
+                    lines: 0,
+                    level: 1,
+                    gameOver: false
+                }).then(() => {
+                    database.ref(`games/${gameId}`).update({ status: 'playing' });
+                    startGame();
+                    listenToOpponent();
                 });
-            }, 1000); // Kiểm tra mỗi 1 giây
-            
-            // Xử lý khi người chơi rời trang
-            window.addEventListener('beforeunload', () => {
-                queueRef.child(playerId).remove();
+            });
+        }
+        
+        function listenForOpponent() {
+            database.ref(`games/${gameId}`).on('value', snapshot => {
+                const gameData = snapshot.val();
+                if (!gameData) return;
+                
+                const players = gameData.players;
+                if (Object.keys(players).length === 2 && gameData.status === 'playing') {
+                    opponentId = Object.keys(players).find(id => id !== playerId);
+                    if (isHost) {
+                        startGame();
+                    }
+                    listenToOpponent();
+                }
             });
         }
         
         function listenToOpponent() {
             database.ref(`games/${gameId}/players`).on('value', snapshot => {
                 const players = snapshot.val();
+                if (!players) return;
+                
                 for (let id in players) {
                     if (id !== playerId) {
-                        opponentId = id;
                         renderOpponentBoard(players[id].board);
                         opponentScoreElement.textContent = players[id].score;
                         opponentLinesElement.textContent = players[id].lines;
@@ -520,11 +562,16 @@
                             finalScoreElement.textContent = `Điểm của bạn: ${score}`;
                             gameOverScreen.classList.remove('d-none');
                             clearInterval(gameInterval);
+                            gameOver = true;
                         }
                     }
                 }
             });
         }
+        
+        createRoomBtn.addEventListener('click', createRoom);
+        joinRoomBtn.addEventListener('click', joinRoom);
+        connectBtn.addEventListener('click', connectToRoom);
         
         document.addEventListener('keydown', event => {
             if (!gameOver && !isPaused && gameId) {
@@ -542,8 +589,6 @@
             }
         });
         
-        startMatchBtn.addEventListener('click', startMatchmaking);
-        
         playAgainBtn.addEventListener('click', () => {
             gameOverScreen.classList.add('d-none');
             gameBoard = createEmptyBoard();
@@ -553,10 +598,13 @@
             gameOver = false;
             gameId = null;
             opponentId = null;
+            isHost = false;
             updateStats();
-            startMatchBtn.disabled = false;
+            roomOptions.classList.add('d-none');
             roomCodeDisplay.classList.add('d-none');
+            joinForm.classList.add('d-none');
             waitingScreen.classList.remove('d-none');
+            database.ref(`games/${gameId}`).off(); // Ngắt lắng nghe Firebase
         });
     </script>
 </body>
