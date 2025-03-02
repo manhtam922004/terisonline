@@ -499,56 +499,113 @@
         }
 
         // Bắt đầu ghép đôi
-        startMatchBtn.addEventListener('click', () => {
-            startMatchBtn.classList.add('d-none');
-            roomCodeDisplay.classList.remove('d-none');
-            
-            const gameRef = database.ref('games').push();
-            gameId = gameRef.key;
-            
-            gameRef.set({
-                players: {
-                    [playerId]: {
-                        score: 0,
-                        answered: false,
-                        answer: null
-                    }
-                },
-                status: 'waiting'
-            }).then(() => {
-                gameRef.on('value', (snapshot) => {
-                    const gameData = snapshot.val();
-                    if (!gameData) return;
+		startMatchBtn.addEventListener('click', () => {
+			startMatchBtn.classList.add('d-none');
+			roomCodeDisplay.classList.remove('d-none');
+			
+			const queueRef = database.ref('match-queue');
+			const gamesRef = database.ref('games');
+			
+			// Thêm người chơi vào hàng đợi
+			queueRef.child(playerId).set({ 
+				timestamp: firebase.database.ServerValue.TIMESTAMP,
+				matched: false,
+				gameId: null
+			});
+			
+			// Lắng nghe thay đổi trong trạng thái ghép đôi của người chơi
+			queueRef.child(playerId).on('value', snapshot => {
+				const playerData = snapshot.val();
+				if (playerData && playerData.matched && playerData.gameId) {
+					gameId = playerData.gameId;
+					gamesRef.child(gameId).once('value', gameSnapshot => {
+						const gameData = gameSnapshot.val();
+						if (gameData && gameData.players) {
+							const players = Object.keys(gameData.players);
+							if (players.length === 2) {
+								gameStarted = true;
+								opponentId = players.find(id => id !== playerId);
+								opponentName.textContent = opponentId.substring(0, 8);
+								opponentStatus.textContent = 'Đã kết nối';
+								opponentStatus.classList.replace('bg-secondary', 'bg-success');
+								waitingScreen.classList.add('d-none');
+								displayQuestion();
 
-                    const players = Object.keys(gameData.players);
-                    if (players.length === 2 && !gameStarted) {
-                        gameStarted = true;
-                        opponentId = players.find(id => id !== playerId);
-                        opponentName.textContent = opponentId.substring(0, 8);
-                        opponentStatus.textContent = 'Đã kết nối';
-                        opponentStatus.classList.replace('bg-secondary', 'bg-success');
-                        waitingScreen.classList.add('d-none');
-                        displayQuestion();
+								// Theo dõi câu trả lời của đối thủ
+								database.ref(`games/${gameId}/players/${opponentId}`).on('value', (snap) => {
+									const opponentData = snap.val();
+									if (opponentData.answered && !opponentHasAnswered) {
+										opponentHasAnswered = true;
+										opponentScore = opponentData.score;
+										opponentScoreElement.textContent = opponentScore;
+										opponentStatus.textContent = opponentData.answer === questions[currentQuestionIndex].correct ? 'Đúng!' : 'Sai!';
+										opponentStatus.classList.replace('bg-success', opponentData.answer === questions[currentQuestionIndex].correct ? 'bg-success' : 'bg-danger');
+										
+										const opponentBtn = document.querySelector(`.answer-btn[data-answer="${opponentData.answer}"]`);
+										if (opponentBtn) opponentBtn.classList.add('opponent-answered');
+										checkNextQuestion();
+									}
+								});
+								
+								queueRef.child(playerId).off(); // Ngừng lắng nghe khi đã ghép đôi thành công
+							}
+						}
+					});
+				}
+			});
+			
+			// Kiểm tra và ghép đôi định kỳ
+			const checkQueue = setInterval(() => {
+				queueRef.orderByChild('timestamp').once('value', snapshot => {
+					const queue = snapshot.val();
+					if (!queue) return;
+					
+					const players = Object.keys(queue)
+						.filter(id => !queue[id].matched)
+						.sort((a, b) => queue[a].timestamp - queue[b].timestamp);
+					
+					if (players.length >= 2) {
+						const firstPlayer = players[0];
+						const secondPlayer = players[1];
+						
+						if (playerId === firstPlayer) {
+							// Chỉ người chơi đầu tiên tạo trận đấu mới
+							gameId = gamesRef.push().key;
+							
+							gamesRef.child(gameId).set({
+								status: 'playing',
+								players: {
+									[firstPlayer]: {
+										score: 0,
+										answered: false,
+										answer: null
+									},
+									[secondPlayer]: {
+										score: 0,
+										answered: false,
+										answer: null
+									}
+								}
+							});
+							
+							// Cập nhật trạng thái ghép đôi cho cả hai người chơi
+							queueRef.child(firstPlayer).update({ matched: true, gameId: gameId });
+							queueRef.child(secondPlayer).update({ matched: true, gameId: gameId });
+							
+							clearInterval(checkQueue);
+						}
+					}
+				});
+			}, 1000);
+			
+			// Xử lý khi người chơi rời trang
+			window.addEventListener('beforeunload', () => {
+				if (queueRef && playerId) {
+					queueRef.child(playerId).remove();
+				}
+			});
+		});
 
-                        // Theo dõi câu trả lời của đối thủ
-                        database.ref(`games/${gameId}/players/${opponentId}`).on('value', (snap) => {
-                            const opponentData = snap.val();
-                            if (opponentData.answered && !opponentHasAnswered) {
-                                opponentHasAnswered = true;
-                                opponentScore = opponentData.score;
-                                opponentScoreElement.textContent = opponentScore;
-                                opponentStatus.textContent = opponentData.answer === questions[currentQuestionIndex].correct ? 'Đúng!' : 'Sai!';
-                                opponentStatus.classList.replace('bg-success', opponentData.answer === questions[currentQuestionIndex].correct ? 'bg-success' : 'bg-danger');
-                                
-                                const opponentBtn = document.querySelector(`.answer-btn[data-answer="${opponentData.answer}"]`);
-                                if (opponentBtn) opponentBtn.classList.add('opponent-answered');
-                                checkNextQuestion();
-                            }
-                        });
-                    }
-                });
-            });
-        });
 
         // Xử lý sự kiện chọn đáp án
         answerButtons.forEach(btn => {
